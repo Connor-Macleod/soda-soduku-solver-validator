@@ -6,10 +6,11 @@ const state = {
     history: [] as string[]
 }
 
-let stopped=false
+let stopped = false
 let frozenGrid = null
 let frozenHistory = null
-function stop(){
+
+function stop() {
     frozenGrid = state.grid.map(row => row.map(cell => cell.clone()))
     stopped = true
     state.grid = frozenGrid
@@ -21,9 +22,11 @@ class Cell {
 
     readonly x: number
     readonly y: number
-    get dom(){
+
+    get dom() {
         return this.ref.value.parentNode
     }
+
     possibleValues: number[]
     regions: region[] = []
     interactions: Cell[] = []
@@ -32,7 +35,8 @@ class Cell {
     ref: null
 
     color = []
-    clone(){
+
+    clone() {
         const cell = new Cell(this.x, this.y, undefined, true)
         cell.possibleValues = [...this.possibleValues]
         cell.history = [...this.history]
@@ -40,19 +44,21 @@ class Cell {
         return cell
     }
 
-    is(value, y){
-        if (y){
-            return this.x===value && this.y===y
+    is(value, y) {
+        if (y) {
+            return this.x === value && this.y === y
         }
-        if (Array.isArray(value)){
-            return value.every(val=>this.possibleValues.includes(val))
+        if (Array.isArray(value)) {
+            return value.every(val => this.possibleValues.includes(val))
         }
         return this.possibleValues.length === 1 && this.possibleValues[0] === value
 
     }
+
     toString() {
         return `${this.x},${this.y}(${this.possibleValues.join(',')})`
     }
+
     constructor(x, y, value?, clone = false) {
         this.x = x;
         this.y = y;
@@ -66,6 +72,7 @@ class Cell {
             this.initValue = value
         }
     }
+
     initInteractions() {
         const allCells = new Set()
         this.regions.forEach(region => {
@@ -75,9 +82,10 @@ class Cell {
         })
         this.interactions = [...allCells]
     }
+
     removePossibleValue(value, reason) {
         if (stopped) return
-        if (this.initValue && this.initValue === value){
+        if (this.initValue && this.initValue === value) {
             console.error(`removing value ${value} from cell ${this.x}, ${this.y} that started with ${this.initValue} and therefore shouldn't be removed`)
             return stop();
         }
@@ -91,17 +99,17 @@ class Cell {
         }
     }
 
-    addHistory(reason){
+    addHistory(reason) {
         if (stopped) return
-        if (reason.target && !Array.isArray(reason.target)){
+        if (reason.target && !Array.isArray(reason.target)) {
             reason.target = [reason.target]
         }
-        if(reason.target && !Array.isArray(reason.from)){
+        if (reason.target && !Array.isArray(reason.from)) {
             reason.from = [reason.from]
         }
-        const lastItem = this.history[this.history.length-1]
-        if (lastItem && lastItem.value === reason.value && lastItem.reason === reason.reason && lastItem.region === reason.region){
-            lastItem.target = [...lastItem.target,...reason.target]
+        const lastItem = this.history[this.history.length - 1]
+        if (lastItem && lastItem.value === reason.value && lastItem.reason === reason.reason && lastItem.region === reason.region) {
+            lastItem.target = [...lastItem.target, ...reason.target]
         } else {
             state.history.push(reason)
         }
@@ -116,12 +124,13 @@ class Cell {
     static getCell(x, y) {
         return state.grid[x - 1][y - 1];
     }
+
     setValue(value, reason?) {
         if (stopped) return
         if (this.possibleValues.length === 1 && this.possibleValues[0] === value) {
             return
         }
-        if (this.initValue){
+        if (this.initValue) {
             console.error(`setting value ${value} on cell ${this.x}, ${this.y} that started with ${this.initValue} and therefore shouldn't be changed`)
             return stop();
         }
@@ -129,17 +138,98 @@ class Cell {
             console.error(`setting value ${value} on cell ${this.x}, ${this.y} that doesn't contain it`)
             stop()
         }
-        if (reason){
+        if (reason) {
             this.addHistory(reason)
         }
         this.possibleValues = [value];
         this.history.push(`set ${value}`)
     }
+
     updateValues() {
         this.ywing()
+        this.xychain()
     }
 
-    ywing(){
+    xychain() {
+        // we find a cell with two values
+        // we then find a cell that interacts with that cell and has two values, one of which matches one of the values of the first cell
+        if (!(this.possibleValues.length === 2)) return
+        const [valueA, valueB] = this.possibleValues
+        const chain = [{cell: this, valueA: valueA, valueB: valueB, linked: true, depth: 0}]
+        this.interactingPairs(valueA).forEach(cellA => {
+            cellA.continueChain(valueA, chain, 1)
+        })
+        this.interactingPairs(valueB).forEach(cellB => {
+            cellB.continueChain(valueB, chain, -1)
+        })
+        let i = 0
+        while (i <= chain.length) {
+            if (chain[i] && !chain[i].linked) {
+                chain[i].cell.continueChain(chain[i].valueA, chain, chain[i].depth + (chain[i].depth > 0 ? +1 : -1))
+                chain[i].linked = true
+            }
+            i++
+        }
+        chain.sort((a, b) => a.depth - b.depth)
+
+        const firstDepth = chain[0].depth
+        const lastDepth = chain[chain.length - 1].depth
+        const chainLength = Math.abs(firstDepth) + Math.abs(lastDepth) + 1
+
+
+        if (chainLength < 3) return
+        // debugger;
+        // console.table(chain.map(chainItem => ({...chainItem, cell: chainItem.cell.toString()})))
+
+        if (chain.find(item => item.cell.is(5, 5)) && chain.find(item => item.cell.is(5, 9)) && chain.find(item => item.cell.is(3, 9)) && chain.find(item => item.cell.is(5, 7)))
+            console.log('chain', chain.map(item => item.cell.toString()))
+        chain.forEach(chainItem => {
+            const {cell, valueA} = chainItem
+            chain.forEach(chainItem2 => {
+                const {cell: cell2, valueB} = chainItem2
+                if (valueA !== valueB) return
+                if ((chainItem2.depth % 2) !== (chainItem.depth % 2)) return
+                if (cell === cell2) return
+                const sharedInteractions = cell.interactions.filter(interaction => cell2.interactions.includes(interaction) && interaction.possibleValues.includes(valueA) && !chain.find(chainItem => chainItem.cell === interaction))
+                // if (sharedInteractions.length) console.log('shared interactions',chain, cell.toString(), cell2.toString(), sharedInteractions.map(interaction => interaction.toString()))
+                sharedInteractions.forEach(interaction => {
+                    if (!interaction.possibleValues.includes(valueA)) return
+                    if (chain.find(chainItem => chainItem.cell === interaction)) return
+                    interaction.removePossibleValue(valueA, {
+                        from: chain.map(link => link.cell),
+                        value: valueA,
+                        target: interaction,
+                        reason: 'xychain removal'
+                    })
+                })
+            })
+        })
+    }
+
+    continueChain(valueA, chain, depth) {
+        if (!(this.possibleValues.length === 2)) return
+        let valueB = this.possibleValues.find(value => value !== valueA)
+        if (depth > 0) {
+            [valueA, valueB] = [valueB, valueA]
+        }
+        if (chain.find(cell => cell.cell === this)) return
+        chain.push({cell: this, valueA, valueB, linked: false, depth})
+        this.interactingPairs(valueB).forEach(cellB => {
+            chain.push({cell: cellB, valueB, valueA, linked: false, depth: depth + (depth > 0 ? +1 : -1)})
+        })
+    }
+
+    interactingPairs(value?, secondValue?, both?) {
+        return this.interactions.filter(cell => {
+            if (!cell.possibleValues.length === 2) return false
+            if (value && !cell.possibleValues.includes(value)) return false
+            if (secondValue && !cell.possibleValues.includes(secondValue)) return false
+            if (both && value && secondValue && !cell.possibleValues.includes(value) && !cell.possibleValues.includes(secondValue)) return false
+            return true
+        })
+    }
+
+    ywing() {
 
         if (this.possibleValues.length !== 2) return
         const [valueA, valueB] = this.possibleValues
@@ -156,9 +246,14 @@ class Cell {
                         const ywing = [this, cellA, cellB]
                         const interactions = cellA.interactions.filter(interaction => cellB.interactions.includes(interaction) && !ywing.includes(interaction))
                         interactions.forEach(interaction => {
-                            if (interaction.possibleValues.includes(valueC)){
+                            if (interaction.possibleValues.includes(valueC)) {
                                 console.log(`removing ${valueC} from ${interaction.x},${interaction.y} because of ywing in ${this.x},${this.y}(${this.possibleValues.join(',')}), looking at ${cellA.x},${cellA.y}(${cellA.possibleValues.join(',')}) and ${cellB.x},${cellB.y}(${cellB.possibleValues.join(',')})`)
-                                interaction.removePossibleValue(valueC, {from: ywing, value: valueC, target: interaction, reason: 'ywing removal'})
+                                interaction.removePossibleValue(valueC, {
+                                    from: ywing,
+                                    value: valueC,
+                                    target: interaction,
+                                    reason: 'ywing removal'
+                                })
                             }
                         })
                     })
@@ -167,7 +262,9 @@ class Cell {
         })
     }
 }
+
 state.getCell = Cell.getCell;
+
 class region {
     cells: Cell[]
     id: string
@@ -175,6 +272,7 @@ class region {
     group: region[] = []
 
     values: Cell[][] = []
+
     constructor(cells, id, group, sum = 45) {
         state.regions.push(this)
         this.cells = cells.map(cell => Cell.getCell(cell.x, cell.y));
@@ -192,15 +290,15 @@ class region {
         return this.id
     }
 
-    get solved(){
+    get solved() {
         return this.values.every(value => value.length === 1)
     }
 
-    updateValues(){
+    updateValues() {
         for (let i = 1; i < 10; i++) {
             this.values[i] = this.cells.filter(cell => cell.possibleValues.includes(i))
             const singleValue = this.values[i].find(cell => cell.possibleValues.length === 1)
-            if (singleValue){
+            if (singleValue) {
                 this.values[i] = [singleValue]
             }
         }
@@ -214,21 +312,33 @@ class region {
         this.swordfish()
     }
 
-    updateCells(){
+    updateCells() {
         this.values.forEach((value, index) => {
             if (!value) return
-            if (value.length === 1){
+            if (value.length === 1) {
                 const cell = value[0]
-                cell.setValue(index, {region: this.id, from: cell, value: index, target: cell, reason: 'only possible location for value in region'})
+                cell.setValue(index, {
+                    region: this.id,
+                    from: cell,
+                    value: index,
+                    target: cell,
+                    reason: 'only possible location for value in region'
+                })
                 this.cells.forEach(cellChecking => {
                     if (cellChecking === cell) return
-                    cellChecking.removePossibleValue(index, {region: this.id, from: cell, value: index, target: cellChecking, reason: 'value in region'})
+                    cellChecking.removePossibleValue(index, {
+                        region: this.id,
+                        from: cell,
+                        value: index,
+                        target: cellChecking,
+                        reason: 'value in region'
+                    })
                 })
             }
         })
     }
 
-    findMultiples(){
+    findMultiples() {
         const multiples = []
         this.cells.forEach(cell => {
             const values = cell.possibleValues
@@ -237,12 +347,18 @@ class region {
             const multiple = this.cells.filter(cellChecking =>
                 cellChecking.possibleValues.every(value => values.includes(value)))
 
-            if (multiple.length === values.length){
+            if (multiple.length === values.length) {
                 multiples.push(multiple)
                 this.cells.forEach(cellChecking => {
                     if (multiple.includes(cellChecking)) return
                     values.forEach(value => {
-                        cellChecking.removePossibleValue(value, {region: this.id, from: cell, value: value, target: cellChecking, reason: 'value in region'})
+                        cellChecking.removePossibleValue(value, {
+                            region: this.id,
+                            from: cell,
+                            value: value,
+                            target: cellChecking,
+                            reason: 'value in region'
+                        })
                     })
                 })
             }
@@ -251,24 +367,30 @@ class region {
         return multiples
     }
 
-    findIntersections(){
+    findIntersections() {
         this.values.forEach((cells, value) => {
-            if (!cells[0]) return console.log("no cells",cells,  value, this.id)
+            if (!cells[0]) return console.log("no cells", cells, value, this.id)
             const matchingRegion = cells[0].regions.find(region => {
                 if (region === this) return false
                 return cells.every(cell => cell.regions.includes(region))
             })
-            if (matchingRegion){
+            if (matchingRegion) {
                 const matchingCells = matchingRegion.cells
                 matchingCells.forEach(cell => {
-                    if (!cells.includes(cell)){
-                        cell.removePossibleValue(value, {region: this.id, from: cell, value: value, target: cell, reason: 'intersection removal'})
+                    if (!cells.includes(cell)) {
+                        cell.removePossibleValue(value, {
+                            region: this.id,
+                            from: cell,
+                            value: value,
+                            target: cell,
+                            reason: 'intersection removal'
+                        })
                     }
                 })
             }
         })
         this.cells.forEach(cell => {
-            if (cell.possibleValues.length === 2){
+            if (cell.possibleValues.length === 2) {
                 const [valueA, valueB] = cell.possibleValues
                 const cellsA = this.values[valueA].filter(filterCell =>
                     cell !== filterCell && filterCell.possibleValues.length === 2
@@ -289,7 +411,13 @@ class region {
                         if (trio.includes(cellChecking)) return
                         trioValues.forEach(value => {
                             cellChecking.removePossibleValue(value,
-                                {region: this.id, from: trio, value: value, target: cellChecking, reason: 'triple removal'}
+                                {
+                                    region: this.id,
+                                    from: trio,
+                                    value: value,
+                                    target: cellChecking,
+                                    reason: 'triple removal'
+                                }
                             )
                         })
                     })
@@ -299,19 +427,19 @@ class region {
         })
     }
 
-    chain(){
+    chain() {
         let once = false
         this.values.forEach((cells, value) => {
             if (once) return
-            const id = Math.floor(Math.random()*100)
-            if (cells.length!==2) return
+            const id = Math.floor(Math.random() * 100)
+            if (cells.length !== 2) return
             const red = []
             const blue = []
             red.push(cells[0])
             blue.push(cells[1])
             this.continueChain(value, cells[0], red, blue)
             this.continueChain(value, cells[1], blue, red)
-            if (red.length<2 || blue.length<2) return
+            if (red.length < 2 || blue.length < 2) return
             if (this.evaluateTwiceInChain(red, blue, value)) return
             else
                 once = true
@@ -319,15 +447,20 @@ class region {
             else
                 once = true
             this.evaluateChainSharedRegion(red, blue, value)
-            red.forEach(cell => {cell.color.push( `red-${id}`)})
-            blue.forEach(cell => {cell.color.push(`blue- ${id}`)})
+            red.forEach(cell => {
+                cell.color.push(`red-${id}`)
+            })
+            blue.forEach(cell => {
+                cell.color.push(`blue- ${id}`)
+            })
         })
     }
-    continueChain(value, cell, matchList, diffList){
+
+    continueChain(value, cell, matchList, diffList) {
         cell.regions.forEach(region => {
-            if (region.values[value].length===2){
+            if (region.values[value].length === 2) {
                 const otherCell = region.values[value].find(findCell => findCell !== cell)
-                if (!diffList.includes(otherCell)){
+                if (!diffList.includes(otherCell)) {
                     diffList.push(otherCell)
                     this.continueChain(value, otherCell, diffList, matchList)
                 }
@@ -335,7 +468,7 @@ class region {
         })
     }
 
-    evaluateTwiceInChain(red, blue, value){
+    evaluateTwiceInChain(red, blue, value) {
         let blueIsValue = false
         const regions = []
         red.forEach(cell => {
@@ -345,7 +478,7 @@ class region {
             })
         })
 
-        if (blueIsValue){
+        if (blueIsValue) {
             blue.forEach(cell => {
                 cell.setValue(value, {region: this.id, from: red, value: value, target: cell, reason: 'chain removal'})
             })
@@ -353,12 +486,18 @@ class region {
         }
     }
 
-    evaluateChainSharedRegion(red, blue, value){
+    evaluateChainSharedRegion(red, blue, value) {
         red.forEach(cellRed => {
             blue.forEach(cellBlue => {
                 const intersection = cellRed.interactions.filter(cell => cellBlue.interactions.includes(cell))
                 intersection.forEach(cell => {
-                    cell.removePossibleValue(value, {region: this.id, from: [cellRed, cellBlue], value: value, target: cell, reason: 'chain shared removal'})
+                    cell.removePossibleValue(value, {
+                        region: this.id,
+                        from: [cellRed, cellBlue],
+                        value: value,
+                        target: cell,
+                        reason: 'chain shared removal'
+                    })
                 })
 
             })
@@ -366,9 +505,9 @@ class region {
         })
     }
 
-    swordfish(){
+    swordfish() {
         this.values.forEach((cells, value) => {
-            if (cells.length!==2) return
+            if (cells.length !== 2) return
             const [cellA, cellB] = cells
             const regionsA = cellA.regions.filter(region => region !== this && !cellB.regions.includes(region))
             if (!regionsA.length) return
@@ -415,9 +554,15 @@ class region {
                                     if (!regionC) return
                                     const swordfish = [cellA, cellB, cellA2, cellB2, cellC, cellD]
                                     const regions = [regionA, regionB, regionC]
-                                    regions.forEach(reg=>reg.values[value].forEach(regionACell => {
+                                    regions.forEach(reg => reg.values[value].forEach(regionACell => {
                                         if (swordfish.includes(regionACell)) return
-                                        regionACell.removePossibleValue(value, {region: this.id, from: swordfish, value: value, target: regionACell, reason: 'swordfish removal'})
+                                        regionACell.removePossibleValue(value, {
+                                            region: this.id,
+                                            from: swordfish,
+                                            value: value,
+                                            target: regionACell,
+                                            reason: 'swordfish removal'
+                                        })
                                     }))
                                 })
 
@@ -430,9 +575,9 @@ class region {
         })
     }
 
-    xwing(){
+    xwing() {
         this.values.forEach((cells, value) => {
-            if(cells.length===2){
+            if (cells.length === 2) {
                 const [cellA, cellB] = cells
                 const cellARegions = cellA.regions.filter(region => region !== this)
                 const cellBRegions = cellB.regions.filter(region => region !== this)
@@ -473,30 +618,30 @@ class region {
 
 
 const rulesetRegions = {
-    soduku: ()=>{
+    soduku: () => {
         console.log('soduku ruleset')
         const rows = []
         const cols = []
         const squares = []
-        for (let i = 0; i<9; i++){
+        for (let i = 0; i < 9; i++) {
             const row = []
             const col = []
-            for (let j = 0; j<9; j++){
-                row.push({x: i+1, y: j+1})
-                col.push({x: j+1, y: i+1})
+            for (let j = 0; j < 9; j++) {
+                row.push({x: i + 1, y: j + 1})
+                col.push({x: j + 1, y: i + 1})
             }
-            new region(row, `row${i+1}`, rows)
-            new region(col, `col${i+1}`, cols)
+            new region(row, `row${i + 1}`, rows)
+            new region(col, `col${i + 1}`, cols)
         }
-        for (let i=0; i<9; i+=3){
-            for (let j=0; j<9; j+=3){
+        for (let i = 0; i < 9; i += 3) {
+            for (let j = 0; j < 9; j += 3) {
                 const square = []
-                for (let k=0; k<3; k++){
-                    for (let l=0; l<3; l++){
-                        square.push({x: i+k+1, y: j+l+1})
+                for (let k = 0; k < 3; k++) {
+                    for (let l = 0; l < 3; l++) {
+                        square.push({x: i + k + 1, y: j + l + 1})
                     }
                 }
-                new region(square, `square${(i/3)+1}-${(j/3)+1}`, squares)
+                new region(square, `square${(i / 3) + 1}-${(j / 3) + 1}`, squares)
             }
         }
     }
@@ -525,13 +670,13 @@ function initGrid(startingCells) {
     state.grid.forEach(row => row.forEach(cell => cell.initInteractions()))
 }
 
-export default function solve(cells: {x:number,y:number, value: number}[] = [], rules = {soduku: true}) {
+export default function solve(cells: { x: number, y: number, value: number }[] = [], rules = {soduku: true}) {
     state.rules = rules
     initGrid(cells)
-    let lastHistoryLength = state.history.length -1 // we always guarantee one run
+    let lastHistoryLength = state.history.length - 1 // we always guarantee one run
     let solved = false
     let iteration = 0
-    while(lastHistoryLength !== state.history.length && !solved && !stopped){
+    while (lastHistoryLength !== state.history.length && !solved && !stopped) {
         console.log('solve iteration', iteration++, solved)
         lastHistoryLength = state.history.length
 
@@ -547,7 +692,7 @@ export default function solve(cells: {x:number,y:number, value: number}[] = [], 
         }
 
     }
-    if (stopped){
+    if (stopped) {
         state.grid = frozenGrid
         state.history = frozenHistory
     }
