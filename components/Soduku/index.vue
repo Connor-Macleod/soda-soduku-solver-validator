@@ -7,14 +7,33 @@ import solve, {state} from '~/solver/newSolver'
 
 let hasRun = false
 
+const route = useRoute()
+let steps = parseInt(route?.query?.steps) || 0
+
+const tableState = ref(state)
 
 const runOnce = ()=>{
   if (hasRun) return
   hasRun = true
-  solve(props.initialCells)
-  console.log(state)
+  solve(props.initialCells, undefined, steps)
+  console.log(state.history[state.history.length-1])
 }
 runOnce()
+
+function nextStep (){
+  steps += 1
+  console.log("nextStep", steps)
+  solve(props.initialCells, undefined, steps)
+  tableState.value = {}
+
+  const url = new URL(location);
+  url.searchParams.set("steps", steps);
+  history.pushState({}, "", url);
+  window.setTimeout(()=>{
+    tableState.value = state
+    console.log(state.history[state.history.length-1])
+  }, 0)
+}
 
 function cellState(cell){
   const {x, y, possibleValues} = cell
@@ -40,10 +59,12 @@ const showSetup = ref(false)
 
 <template>
   <div>
+    <button @click="nextStep">Next step</button>
+    Last step: {{tableState?.history?.[tableState?.history.length-1]?.reason}}
     <table>
-      <tr v-for="row in state?.grid">
+      <tr v-for="row in tableState?.grid">
         <td v-for="cell in row" :class="cellState(cell)">
-          <SodukuCell :cell="cell" />
+          <SodukuCell :cell="cell" :lastStep="tableState?.history[tableState?.history?.length-1]" />
         </td>
       </tr>
     </table>
